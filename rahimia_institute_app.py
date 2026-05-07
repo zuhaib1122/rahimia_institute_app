@@ -55,7 +55,7 @@ sheet_conn = connect_to_sheet()
 
 tab1, tab2 = st.tabs(["📝 Booking Form", "📊 Cow Inventory & Parts"])
 
-with tab1:
+with ta
     if 'last_receipt' not in st.session_state:
         st.session_state.last_receipt = None
 
@@ -67,9 +67,9 @@ with tab1:
             whatsapp = st.text_input("WhatsApp Number")
             cnic = st.text_input("CNIC (Optional)")
         with c2:
-            p_type = st.selectbox("Participation Type", ["Cow Share", "Full Cow", "Goat"])
-            meat = st.selectbox("Meat Contribution", ["Keep for Self", "Donate to Rahimia Institute", "50/50 Split"])
-            qty = st.number_input("How many Shares/Animals?", min_value=1, max_value=70, value=1)
+            p_type = st.selectbox("Participation Type", ["Cow Share", "Full Cow"])
+            meat = st.selectbox("Charity Decision", ["Keep for Self", "Donate to Rahimia Institute"])
+            qty = st.number_input("How many Shares/Animals?", min_value=1, max_value=7, value=1)
         
         submitted = st.form_submit_button("Confirm & Save Booking")
 
@@ -121,7 +121,7 @@ with tab1:
                 <h2 style="text-align:center; color:#1E3A8A; margin-bottom:0;">RAHIMIA INSTITUTE</h2>
                 <hr><p><b>Contributor:</b> {res['name']}</p>
                 <p><b>WhatsApp:</b> {res['whatsapp']}</p>
-                <p><b>Booking:</b> {res['qty']} x {res['p_type']}</p>
+                <p><b>Booking:</b> {res['qty']} : {res['p_type']}</p>
                 <div class="slot-highlight"><b>Assigned Slots:</b><br>{res['slots']}</div>
             </div>
         """, unsafe_allow_html=True)
