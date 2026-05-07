@@ -13,18 +13,26 @@ def connect_to_sheet():
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         sheet = client.open("rahimia_instituate_qurbani_data").sheet1
+        
+        # SAFETY CHECK: Ensure Headers are correct
+        expected_headers = ["ID", "Date", "Name", "Phone", "CNIC", "Type", "Qty", "Meat_Contribution", "Cow_Number", "Part_Number"]
+        current_headers = sheet.row_values(1)
+        if current_headers != expected_headers:
+            sheet.insert_row(expected_headers, 1)
+            
         return sheet
     except Exception as e:
         st.error(f"⚠️ Connection Error: {e}")
         return None
 
-# --- FETCH DATA ---
-def fetch_data():
-    conn = connect_to_sheet()
-    if conn:
-        records = conn.get_all_records()
-        return pd.DataFrame(records), conn
-    return pd.DataFrame(), None
+def fetch_data(sheet):
+    if sheet:
+        try:
+            records = sheet.get_all_records()
+            return pd.DataFrame(records)
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Rahimia Institute Portal", layout="wide", page_icon="🐄")
@@ -32,14 +40,14 @@ st.set_page_config(page_title="Rahimia Institute Portal", layout="wide", page_ic
 st.markdown("""
     <style>
     .main-head { font-size: 38px; color: #1E3A8A; text-align: center; font-weight: bold; padding: 15px; background: #f0f2f6; border-radius: 10px; margin-bottom: 20px; }
-    .invoice-box { border: 2px dashed #1E3A8A; padding: 20px; border-radius: 15px; background: white; color: black; }
-    .stMetric { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; }
+    .invoice-box { border: 2px dashed #1E3A8A; padding: 20px; border-radius: 15px; background: white; color: black; box-shadow: 2px 2px 10px rgba(0,0,0,0.1); }
     </style>
     """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-head">Rahimia Institute: Qurbani Management</div>', unsafe_allow_html=True)
 
-df, sheet_conn = fetch_data()
+# Persistent Connection
+sheet_conn = connect_to_sheet()
 
 tab1, tab2 = st.tabs(["📝 Booking Form", "📊 Cow Inventory & Parts"])
 
@@ -60,15 +68,15 @@ with tab1:
 
     if submitted:
         if name and whatsapp:
-            # 1. Calculate Current Global Share Count
-            # We filter for 'Cow Share' or 'Full Cow' because Goats don't have parts
-            shares_df = df[df['Type'].isin(['Cow Share', 'Full Cow'])] if not df.empty else pd.DataFrame()
+            # Get data for calculation
+            df = fetch_data(sheet_conn)
+            # Filter only cow-related parts for cow numbering
+            shares_df = df[df['Cow_Number'].str.contains("Cow", na=False)] if not df.empty else pd.DataFrame()
             current_total_parts = len(shares_df)
             
             new_rows = []
-            # Determine how many "parts" to add
             loops = (qty * 7) if p_type == "Full Cow" else qty
-            if p_type == "Goat": loops = 1 # Goats are separate
+            if p_type == "Goat": loops = 1
 
             for i in range(loops):
                 current_total_parts += 1
@@ -76,66 +84,49 @@ with tab1:
                 part_num = ((current_total_parts - 1) % 7) + 1
                 order_id = f"RI-{uuid.uuid4().hex[:5].upper()}"
                 
-                # Format: ID | Date | Name | Phone | CNIC | Type | Qty | Meat | Cow | Part_No
                 assigned_cow = f"Cow-{cow_num}" if p_type != "Goat" else "Goat-N/A"
                 assigned_part = f"Part-{part_num}" if p_type != "Goat" else "1/1"
                 
                 row = [order_id, str(date.today()), name, whatsapp, cnic, p_type, 1, meat, assigned_cow, assigned_part]
                 new_rows.append(row)
             
-            # Save to Sheet
             sheet_conn.append_rows(new_rows)
-            st.success(f"✅ Successfully booked {qty} {p_type}(s). Total entries created: {len(new_rows)}")
+            st.success(f"✅ Registered {qty} {p_type}(s) successfully!")
             
-            # Show Simple Receipt
             st.markdown(f"""
             <div class="invoice-box">
-                <h3 style="text-align:center;">RAHIMIA INSTITUTE RECEIPT</h3>
+                <h3 style="text-align:center; color:#1E3A8A;">BOOKING CONFIRMED</h3>
                 <p><b>Name:</b> {name} | <b>WhatsApp:</b> {whatsapp}</p>
-                <p><b>Total {p_type}s:</b> {qty}</p>
-                <p><b>Last Assigned:</b> {new_rows[-1][-2]} ({new_rows[-1][-1]})</p>
-                <hr>
-                <p style="text-align:center; font-size:12px;">Data synced. Please switch to Tab 2 to see the Cow Chart.</p>
+                <p><b>Items:</b> {qty} {p_type}</p>
+                <p><b>Assigned:</b> {new_rows[0][-2]} to {new_rows[-1][-2]}</p>
             </div>
             """, unsafe_allow_html=True)
-            st.button("🔄 Update Records")
+            if st.button("Refresh for New Entry"):
+                st.rerun()
         else:
-            st.error("Please enter Name and WhatsApp.")
+            st.error("Please fill Name and WhatsApp.")
 
 with tab2:
-    df_fresh, _ = fetch_data()
+    df_fresh = fetch_data(sheet_conn)
     
-    if not df_fresh.empty:
-        # Filter out Goats for the Cow-specific view
+    if not df_fresh.empty and 'Cow_Number' in df_fresh.columns:
         cow_df = df_fresh[df_fresh['Cow_Number'].str.contains("Cow", na=False)]
         
-        st.subheader("🐄 Detailed Cow Share Chart")
-        
-        # Metrics
-        total_parts_filled = len(cow_df)
-        full_cows = total_parts_filled // 7
-        remaining_in_last = total_parts_filled % 7
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Shares Filled", total_parts_filled)
-        m2.metric("Complete Cows", full_cows)
-        m3.metric("Current Cow Slots", f"{remaining_in_last}/7")
-        
-        st.divider()
-
-        # Selection Filter
-        cow_list = sorted(cow_df['Cow_Number'].unique(), key=lambda x: int(x.split('-')[1]))
-        selected_cow = st.selectbox("🎯 Select Cow to View All 7 Parts:", cow_list)
-        
-        # Display the specific Cow's Breakdown
-        display_df = cow_df[cow_df['Cow_Number'] == selected_cow].copy()
-        # Sort by Part Number
-        display_df['sort_val'] = display_df['Part_Number'].apply(lambda x: int(x.split('-')[1]))
-        display_df = display_df.sort_values('sort_val')
-        
-        st.write(f"### {selected_cow} Contributors")
-        st.table(display_df[['Part_Number', 'Name', 'ID', 'Phone', 'CNIC', 'Meat_Contribution']])
-        
+        if not cow_df.empty:
+            st.subheader("🐄 Cow Allocation Chart")
+            
+            # Smart sorting for cow numbers (1, 2, 3 instead of 1, 10, 2)
+            cow_list = sorted(cow_df['Cow_Number'].unique(), key=lambda x: int(x.split('-')[1]))
+            selected_cow = st.selectbox("Select Cow Number to view Parts:", cow_list)
+            
+            display_df = cow_df[cow_df['Cow_Number'] == selected_cow].copy()
+            display_df['p_sort'] = display_df['Part_Number'].apply(lambda x: int(x.split('-')[1]))
+            display_df = display_df.sort_values('p_sort')
+            
+            st.table(display_df[['Part_Number', 'Name', 'Phone', 'ID', 'Meat_Contribution']])
+        else:
+            st.info("No Cow bookings found yet.")
+            
         if st.button("🔄 Sync Live Data"):
             st.rerun()
     else:
