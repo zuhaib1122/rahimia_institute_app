@@ -14,7 +14,7 @@ def connect_to_sheet():
         client = gspread.authorize(creds)
         sheet = client.open("rahimia_instituate_qurbani_data").sheet1
         
-        # Ensure Headers
+        # Updated Headers with "Total_Paid"
         expected = ["ID", "Date", "Name", "Phone", "CNIC", "Type", "Qty", "Meat_Contribution", "Cow_Number", "Part_Number", "Total_Paid"]
         try:
             first_row = sheet.row_values(1)
@@ -45,7 +45,7 @@ st.markdown("""
     .main-head { font-size: 38px; color: #1E3A8A; text-align: center; font-weight: bold; padding: 15px; background: #f0f2f6; border-radius: 10px; margin-bottom: 20px; border: 1px solid #d1d5db; }
     .invoice-box { border: 3px solid #1E3A8A; padding: 25px; border-radius: 15px; background-color: #ffffff; color: #000000; box-shadow: 10px 10px 5px #eeeeee; }
     .slot-highlight { background-color: #f0f4f8; padding: 10px; border-radius: 5px; border-left: 5px solid #1E3A8A; font-family: monospace; font-size: 18px; color: #1E3A8A; }
-    .total-paid { font-size: 24px; color: #047857; font-weight: bold; border: 2px solid #047857; padding: 10px; border-radius: 5px; display: inline-block; }
+    .total-paid { font-size: 22px; color: #047857; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -76,12 +76,15 @@ with tab1:
     if submitted:
         if name and whatsapp:
             df = fetch_data(sheet_conn)
-            cow_parts_df = df[df['Cow_Number'].astype(str).str.contains("Cow", na=False)] if not df.empty else pd.DataFrame()
+            if not df.empty and 'Cow_Number' in df.columns:
+                cow_parts_df = df[df['Cow_Number'].astype(str).str.contains("Cow", na=False)]
+            else:
+                cow_parts_df = pd.DataFrame()
+                
             current_total_parts = len(cow_parts_df)
-            
             new_rows, receipt_slots = [], []
             
-            # MATH LOGIC
+            # MATH LOGIC: 28,000 per share. Full cow = 7 shares.
             price_per_share = 28000
             total_shares = (qty * 7) if p_type == "Full Cow" else qty
             total_amount = total_shares * price_per_share
@@ -96,8 +99,8 @@ with tab1:
                 assigned_part = f"Part-{part_num}"
                 receipt_slots.append(f"C{cow_num}-P{part_num}")
                 
-                # FIXED: Saving 'total_amount' instead of 'price_per_share' to the sheet
-                row = [order_id, str(date.today()), name, whatsapp, cnic, p_type, qty, meat, assigned_cow, assigned_part, total_amount]
+                # Each row records the individual part and the proportional payment info
+                row = [order_id, str(date.today()), name, whatsapp, cnic, p_type, 1, meat, assigned_cow, assigned_part, price_per_share]
                 new_rows.append(row)
             
             sheet_conn.append_rows(new_rows)
@@ -118,20 +121,18 @@ with tab1:
             <div class="invoice-box">
                 <h2 style="text-align:center; color:#1E3A8A; margin-bottom:10px;">RAHIMIA INSTITUTE</h2>
                 <hr>
-                <div style="font-size: 16px;">
-                    <p><b>Date:</b> {res['date']}</p>
-                    <p><b>Contributor:</b> {res['name']}</p>
-                    <p><b>WhatsApp:</b> {res['whatsapp']}</p>
-                    <p><b>CNIC:</b> {res['cnic']}</p>
-                    <p><b>Booking:</b> {res['qty']} x {res['p_type']}</p>
-                    <p class="total-paid">Total Amount: Rs. {res['total_paid']:,}</p>
-                </div>
+                <p><b>Date:</b> {res['date']}</p>
+                <p><b>Contributor:</b> {res['name']}</p>
+                <p><b>WhatsApp:</b> {res['whatsapp']}</p>
+                <p><b>CNIC:</b> {res['cnic']}</p>
+                <p><b>Booking:</b> {res['qty']} x {res['p_type']}</p>
+                <p class="total-paid">Total Paid Amount: Rs. {res['total_paid']:,}</p>
                 <div class="slot-highlight"><b>Assigned Slots:</b><br>{res['slots']}</div>
                 <hr>
-                <p style="text-align:center; font-size:12px; color:gray;">JazakAllah. Screenshot this receipt for the customer.</p>
+                <p style="text-align:center; font-size:12px; color:gray;">Please screenshot this receipt for your records.</p>
             </div>
         """, unsafe_allow_html=True)
-        if st.button("Proceed to Next Entry"):
+        if st.button("New Booking"):
             st.session_state.last_receipt = None
             st.rerun()
 
@@ -154,7 +155,9 @@ with tab2:
             display_df['p_val'] = display_df['Part_Number'].apply(get_num)
             display_df = display_df.sort_values('p_val')
             
-            # Displaying columns including Total Paid
+            # Added Total_Paid to the inventory display
             st.table(display_df[['Part_Number', 'Name', 'Phone', 'CNIC', 'Meat_Contribution', 'Total_Paid']])
         else:
-            st.info("No bookings found yet.")
+            st.info("No Cow bookings found.")
+    else:
+        st.info("System is currently empty.")
